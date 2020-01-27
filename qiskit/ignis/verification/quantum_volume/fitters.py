@@ -243,6 +243,7 @@ class QVFitter:
                                         (1.0-self._ydata[2][depthidx])
                                         / self._ntrials)**0.5
 
+    # pylint: disable=invalid-name
     def plot_qv_data(self, ax=None, show_plt=True):
         """
         Plot the qv data as a function of depth
