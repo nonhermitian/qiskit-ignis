@@ -12,7 +12,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-# pylint: disable=undefined-loop-variable
+# pylint: disable=undefined-loop-variable,invalid-name,missing-type-doc
 
 """
 Run through RB for different qubit numbers to check that it's working
@@ -28,6 +28,7 @@ from ddt import ddt, data, unpack
 
 import qiskit
 import qiskit.ignis.verification.randomized_benchmarking as rb
+from qiskit import QiskitError
 
 
 @ddt
@@ -40,7 +41,7 @@ class TestRB(unittest.TestCase):
         Choose a valid field for rb_opts['rb_pattern']
 
         Args:
-            pattern_type: a number between 0 and 2.
+            pattern_type (int): a number between 0 and 2.
                 0 - a list of all qubits, for nq=5 it is
                     [1, 2, 3, 4, 5].
                 1 - a list of lists of single qubits, for nq=5
@@ -49,17 +50,21 @@ class TestRB(unittest.TestCase):
                     two lists where the first one has 2 elements,
                     for example for nq=5 it can be
                     [[4, 1], [2, 5, 3]].
-            nq: number of qubits
+            nq (int): number of qubits
 
         Returns:
-            the pattern or ``None``.
-            Returns ``None`` if the pattern type is not relevant to the
-            number of qubits, i.e,, one of two cases:
-            pattern_type = 1 and nq = 1, which implies [[1]]
-            pattern_type = 2 and nq <= 2: - for nq=1 this is impossible
-                                        - for nq=2 this implies
-                                            [[1], [2]], which is already
-                                            tested when pattern_type = 1.
+            tuple: of the form (``res``, ``is_purity``)
+                where the tuple is  the pattern or ``None``.
+                Returns ``None`` if the pattern type is not relevant to the
+                number of qubits, i.e,, one of two cases:
+                pattern_type = 1 and nq = 1, which implies [[1]]
+                pattern_type = 2 and nq <= 2:
+
+                - for nq=1 this is impossible
+                - for nq=2 this implies
+                  [[1], [2]], which is already
+                  tested when pattern_type = 1.
+
             is_purity = True if the pattern fits for purity rb
             (namely, all the patterns have the same dimension:
             only 1-qubit, only 2-qubits etc.).
@@ -95,13 +100,13 @@ class TestRB(unittest.TestCase):
         """
 
         Args:
-            multi_opt:
+            mult_opt (int): the multiplier option to use:
                 0: fixed length
                 1: vector of lengths
-            len_pattern: number of patterns
+            len_pattern (int): number of patterns
 
         Returns:
-            the length multiplier
+            int or list: the length multiplier
         """
         if mult_opt == 0:
             res = 1
@@ -114,13 +119,12 @@ class TestRB(unittest.TestCase):
     def choose_interleaved_gates(rb_pattern):
         """
         Args:
-            rb_pattern: pattern for randomized benchmarking
+            rb_pattern (list): pattern for randomized benchmarking
 
         Returns:
-            interleaved_gates:
-            A list of gates of group elements that
-            will be interleaved (for interleaved randomized benchmarking)
-            The length of the list would equal the length of the rb_pattern.
+            list: A list of gates of group elements that
+                will be interleaved (for interleaved randomized benchmarking)
+                The length of the list would equal the length of the rb_pattern.
         """
         pattern_sizes = [len(pat) for pat in rb_pattern]
         interleaved_gates = []
@@ -544,7 +548,7 @@ class TestRB(unittest.TestCase):
                     npurity, 3 ** len(rb_opts['rb_pattern'][0]),
                     'Error: npurity does not equal to 3^n')
 
-        except OSError:
+        except (OSError, EOFError):
             skip_msg = ('Skipping tests for %s qubits because '
                         'tables are missing' % str(nq))
             raise unittest.SkipTest(skip_msg)
@@ -692,8 +696,12 @@ class TestRB(unittest.TestCase):
         self.assertEqual(circ_index, len(rb_circs),
                          "Error: additional circuits exist")
 
-    def test_rb_utils(self):
-        """Test some of the utility calculations, e.g. coherence limit."""
+
+class TestRBUtils(unittest.TestCase):
+    """Test for RB utilities."""
+
+    def test_coherence_limit(self):
+        """Test coherence_limit."""
         t1 = 100.
         t2 = 100.
         gate2Q = 0.5
@@ -710,12 +718,212 @@ class TestRB(unittest.TestCase):
         self.assertAlmostEqual(twoq_coherence_err, 0.00597, 5,
                                "Error: 2Q Coherence Limit")
 
-        twoq_epc = rb.rb_utils.twoQ_clifford_error([5.2, 5.2, 1.5],
-                                                   [0, 1, -1],
-                                                   [0.001, 0.0015, 0.02])
+    @staticmethod
+    def create_fake_circuits(num_gates):
+        """Helper function to generate list of circuits with given basis gate numbers."""
+        circs = []
+        for num_gate in num_gates:
+            circ = qiskit.QuantumCircuit(2)
+            for _ in range(num_gate[0]):
+                circ.u1(0, 0)
+            for _ in range(num_gate[1]):
+                circ.u2(0, 0, 0)
+            for _ in range(num_gate[2]):
+                circ.u3(0, 0, 0, 0)
+            for _ in range(num_gate[3]):
+                circ.cx(0, 1)
+            circs.append(circ)
 
-        self.assertAlmostEqual(twoq_epc, 0.0446283, 6,
-                               "Error: 2Q EPC Calculation")
+        return circs
+
+    def test_gates_per_clifford(self):
+        """Test gate per Clifford."""
+        num_gates = [[6, 7, 5, 8], [10, 12, 8, 14]]
+        clifford_lengths = np.array([4, 8])
+
+        circs = self.create_fake_circuits(num_gates)
+        gpc = rb.rb_utils.gates_per_clifford(transpiled_circuits_list=[circs],
+                                             clifford_lengths=clifford_lengths,
+                                             basis=['u1', 'u2', 'u3', 'cx'],
+                                             qubits=[0])
+        ncliffs = np.sum(clifford_lengths + 1)
+
+        self.assertAlmostEqual(gpc[0]['u1'],
+                               (num_gates[0][0] + num_gates[1][0]) / ncliffs)
+        self.assertAlmostEqual(gpc[0]['u2'],
+                               (num_gates[0][1] + num_gates[1][1]) / ncliffs)
+        self.assertAlmostEqual(gpc[0]['u3'],
+                               (num_gates[0][2] + num_gates[1][2]) / ncliffs)
+        self.assertAlmostEqual(gpc[0]['cx'],
+                               (num_gates[0][3] + num_gates[1][3]) / ncliffs)
+
+    def test_gates_per_clifford_with_invalid_basis(self):
+        """Test gate per Clifford when invalid gate is included in basis."""
+        num_gates = [[1, 1, 1, 1]]
+        clifford_lengths = np.array([1])
+
+        circs = self.create_fake_circuits(num_gates)
+        gpc = rb.rb_utils.gates_per_clifford(transpiled_circuits_list=[circs],
+                                             clifford_lengths=clifford_lengths,
+                                             basis=['u1', 'u2', 'u3', 'cx', 'fake_gate'],
+                                             qubits=[0])
+
+        self.assertAlmostEqual(gpc[0]['fake_gate'], 0)
+
+    def test_calculate_1q_epg(self):
+        """Test calculating EPGs of single qubit gates."""
+        gpc = {0: {'cx': 0, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epc = 2.6e-4
+
+        epg_u1 = 0
+        epg_u2 = epc / (0.3 + 2 * 0.5)
+        epg_u3 = 2 * epg_u2
+
+        epgs = rb.calculate_1q_epg(gpc, epc, 0)
+
+        # test raise error when invalid qubit is specified.
+        with self.assertRaises(QiskitError):
+            rb.calculate_1q_epg(gpc, epc, 1)
+
+        # check values
+        self.assertAlmostEqual(epgs['u1'], epg_u1)
+        self.assertAlmostEqual(epgs['u2'], epg_u2)
+        self.assertAlmostEqual(epgs['u3'], epg_u3)
+
+    def test_calculate_1q_epg_with_wrong_basis(self):
+        """Test calculating EPGs of single qubit gates with wrong basis."""
+        gpc = {0: {'cx': 0, 'rx': 0.3, 'ry': 0.3, 'rz': 0.3}}
+        epc = 2.6e-4
+
+        with self.assertRaises(QiskitError):
+            rb.calculate_1q_epg(gpc, epc, 0)
+
+    def test_calculate_1q_epg_with_cx(self):
+        """Test calculating EPGs of single qubit gates with nonzero two qubit gate."""
+        gpc = {0: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epc = 2.6e-4
+
+        with self.assertRaises(QiskitError):
+            rb.calculate_1q_epg(gpc, epc, 0)
+
+    def test_calculate_2q_epg(self):
+        """Test calculating EPG of two qubit gate."""
+        gpc = {0: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5},
+               1: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epgs_q0 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epgs_q1 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epc = 1.0e-2
+
+        alpha_1q = (1 - 2 * 1e-4) ** 0.3 * (1 - 2 * 2e-4) ** 0.5
+        alpha_c_1q = 1 / 5 * (2 * alpha_1q + 3 * alpha_1q ** 2)
+        alpha_c_2q = (1 - 4 / 3 * epc) / alpha_c_1q
+
+        epg_with_1q_epgs = 3 / 4 * (1 - alpha_c_2q) / 1.5
+        epg_without_1q_epgs = epc/1.5
+
+        # test raise error when invalid number of qubit is given.
+        with self.assertRaises(QiskitError):
+            rb.calculate_2q_epg(gpc, epc, [0, 1, 2], [epgs_q0, epgs_q1])
+
+        # test raise error when invalid qubit pair is specified.
+        with self.assertRaises(QiskitError):
+            rb.calculate_2q_epg(gpc, epc, [0, 2], [epgs_q0, epgs_q1])
+
+        # when 1q EPGs are not given
+        self.assertAlmostEqual(
+            rb.calculate_2q_epg(gpc, epc, [0, 1]),
+            epg_without_1q_epgs,
+        )
+
+        # when 1q EPGs are given
+        self.assertAlmostEqual(
+            rb.calculate_2q_epg(gpc, epc, [0, 1], [epgs_q0, epgs_q1]),
+            epg_with_1q_epgs
+        )
+
+    def test_calculate_2q_epg_with_another_gate_name(self):
+        """Test calculating EPG of two qubit gate when another gate name is specified."""
+        gpc = {0: {'cz': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5},
+               1: {'cz': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epc = 1.0e-2
+
+        # test raise error when default basis name is specified
+        with self.assertRaises(QiskitError):
+            rb.calculate_2q_epg(gpc, epc, [0, 1])
+
+        # pass when correct name is specified
+        self.assertAlmostEqual(
+            rb.calculate_2q_epg(gpc, epc, [0, 1], two_qubit_name='cz'), epc/1.5
+        )
+
+    def test_twoQ_clifford(self):
+        """Test calculating EPC from EPC."""
+        error_1q = 0.001
+        error_2q = 0.01
+
+        gpc = {0: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5},
+               1: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        gate_qubit = [0, 0, 0, 1, 1, 1, -1]
+        gate_err = [0, error_1q, 2*error_1q, 0, error_1q, 2*error_1q, error_2q]
+
+        alpha_2q = (1 - 4 / 3 * error_2q) ** 1.5
+        alpha_1q = (1 - 2 * error_1q) ** 0.3 * (1 - 4 * error_1q) ** 0.5
+
+        alpha_c_2q = 1 / 5 * (2 * alpha_1q + 3 * alpha_1q * alpha_1q) * alpha_2q
+
+        with self.assertWarns(DeprecationWarning):
+            epc = rb.twoQ_clifford_error(gpc, gate_qubit, gate_err)
+
+        self.assertAlmostEqual(epc, 3 / 4 * (1 - alpha_c_2q))
+
+    def test_calculate_1q_epc(self):
+        """Test calculating EPC from EPG of single qubit gates."""
+        gpc = {0: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epgs = {'u1': 0, 'u2': 0.001, 'u3': 0.002}
+
+        epc_ref = 1 - (1 - 0.001)**0.3 * (1 - 0.002)**0.5
+        epc = rb.calculate_1q_epc(gpc, epgs, 0)
+
+        self.assertAlmostEqual(epc, epc_ref)
+
+    def test_calculate_2q_epc(self):
+        """Test calculating two qubit EPC from EPGs."""
+        gpc = {0: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5},
+               1: {'cx': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epgs_q0 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epgs_q1 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epg_q01 = 1e-3
+
+        alpha_1q = (1 - 2 * 1e-4)**0.3 * (1 - 2 * 2e-4)**0.5
+        alpha_2q = (1 - 4 / 3 * 1e-3)**1.5
+
+        alpha_c = 1 / 5 * (2 * alpha_1q + 3 * alpha_1q ** 2) * alpha_2q
+
+        self.assertAlmostEqual(
+            rb.calculate_2q_epc(gpc, epg_q01, [0, 1], [epgs_q0, epgs_q1]),
+            3 / 4 * (1 - alpha_c)
+        )
+
+    def test_calculate_2q_epc_with_another_gate_name(self):
+        """Test calculating two qubit EPC from EPGs when another gate name is specified."""
+        gpc = {0: {'cz': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5},
+               1: {'cz': 1.5, 'u1': 0.1, 'u2': 0.3, 'u3': 0.5}}
+        epgs_q0 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epgs_q1 = {'u1': 0, 'u2': 1e-4, 'u3': 2e-4}
+        epg_q01 = 1e-3
+
+        alpha_1q = (1 - 2 * 1e-4) ** 0.3 * (1 - 2 * 2e-4) ** 0.5
+        alpha_2q = (1 - 4 / 3 * 1e-3) ** 1.5
+
+        alpha_c = 1 / 5 * (2 * alpha_1q + 3 * alpha_1q ** 2) * alpha_2q
+
+        with self.assertRaises(QiskitError):
+            rb.calculate_2q_epc(gpc, epg_q01, [0, 1], [epgs_q0, epgs_q1])
+
+        self.assertAlmostEqual(
+            rb.calculate_2q_epc(gpc, epg_q01, [0, 1], [epgs_q0, epgs_q1], two_qubit_name='cz'),
+            3 / 4 * (1 - alpha_c)
+        )
 
 
 if __name__ == '__main__':

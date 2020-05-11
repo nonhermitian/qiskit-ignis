@@ -46,7 +46,7 @@ author = 'Qiskit Development Team'
 # The short X.Y version
 version = ''
 # The full version, including alpha/beta/rc tags
-release = '0.12.0'
+release = '0.4.0'
 
 # -- General configuration ---------------------------------------------------
 
@@ -65,10 +65,11 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.extlinks',
     'sphinx_tabs.tabs',
-    'sphinx_automodapi.automodapi',
-    'jupyter_sphinx.execute',
+    'jupyter_sphinx',
     'sphinx_autodoc_typehints',
     'reno.sphinxext',
+    'IPython.sphinxext.ipython_console_highlighting',
+    'IPython.sphinxext.ipython_directive',
 ]
 html_static_path = ['_static']
 templates_path = ['_templates']

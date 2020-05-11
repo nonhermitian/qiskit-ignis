@@ -13,13 +13,14 @@
 # that they have been altered from the originals.
 
 # TODO(mtreinish): Remove these disables when implementation is finished
-# pylint: disable=unused-argument,unnecessary-pass
+# pylint: disable=unused-argument,unnecessary-pass,invalid-name
 
 """
 Generates randomized benchmarking sequences
 """
 
 import copy
+from typing import List, Optional
 import numpy as np
 import qiskit
 
@@ -37,12 +38,15 @@ def handle_length_multiplier(length_multiplier, len_pattern,
     In case of purity rb the length multiplier should be None.
 
     Args:
-        length_multiplier: length of the multiplier
-        len_pattern: length of the RB pattern
-        is_purity: True only for purity rb (default is False)
+        length_multiplier (list): length of the multiplier
+        len_pattern (int): length of the RB pattern
+        is_purity (bool): True only for purity rb (default is False)
 
     Returns:
-        length_multiplier
+        list: length_multiplier
+
+    Raises:
+        ValueError: if the input is invalid
     """
 
     if hasattr(length_multiplier, "__len__"):
@@ -70,18 +74,18 @@ def check_pattern(pattern, is_purity=False):
     dimension (e.g. only 1-qubit sequences, or only 2-qubit sequences etc.)
 
     Args:
-        pattern: RB pattern
-        n_qubits: number of qubits
-        is_purity: True only for purity rb (default is False)
+        pattern (list): RB pattern
+        is_purity (bool): True only for purity rb (default is False)
 
     Raises:
         ValueError: if the pattern is not valid
 
     Return:
-        qlist: flat list of all the qubits in the pattern
-        maxqubit: the maximum qubit number
-        maxdim: the maximal dimension (maximal number of qubits
-            in all sequences)
+        tuple: of the form (``qlist``, ``maxqubit``, ``maxdim``) where:
+            qlist: flat list of all the qubits in the pattern
+            maxqubit: the maximum qubit number
+            maxdim: the maximal dimension (maximal number of qubits
+                in all sequences)
     """
 
     pattern_flat = []
@@ -109,11 +113,11 @@ def calc_xdata(length_vector, length_multiplier):
     Calculate the set of sequences lengths
 
     Args:
-        length_vector: vector length
-        length_multiplier: length of the multiplier of the vector length
+        length_vector (list): vector length
+        length_multiplier (list): length of the multiplier of the vector length
 
     Returns:
-        An array of sequences lengths
+        ndarray: An array of sequences lengths
     """
 
     xdata = []
@@ -123,78 +127,180 @@ def calc_xdata(length_vector, length_multiplier):
     return np.array(xdata)
 
 
-def randomized_benchmarking_seq(nseeds=1, length_vector=None,
-                                rb_pattern=None,
-                                length_multiplier=1, seed_offset=0,
-                                align_cliffs=False,
-                                interleaved_gates=None,
-                                is_purity=False,
-                                group_gates=None):
-    """Get a generic randomized benchmarking sequence
+def randomized_benchmarking_seq(nseeds: int = 1,
+                                length_vector: Optional[List[int]] = None,
+                                rb_pattern: Optional[List[List[int]]] = None,
+                                length_multiplier: Optional[List[int]] = 1,
+                                seed_offset: int = 0,
+                                align_cliffs: bool = False,
+                                interleaved_gates: Optional[List[List[str]]] = None,
+                                is_purity: bool = False,
+                                group_gates: Optional[str] = None) -> \
+        (List[List[qiskit.QuantumCircuit]], List[List[int]],
+         Optional[List[List[qiskit.QuantumCircuit]]],
+         Optional[List[List[List[qiskit.QuantumCircuit]]]],
+         Optional[int]):
+    """Generate generic randomized benchmarking (RB) sequences.
 
     Args:
-        nseeds: number of seeds
-        length_vector: 'm' length vector of sequence lengths. Must be in
+        nseeds: The number of seeds. For each seed the function generates
+            a separate list of output RB circuits.
+
+        length_vector: Length vector of the RB sequence lengths. Must be in
             ascending order. RB sequences of increasing length grow on top of
             the previous sequences.
-        rb_pattern: A list of the form [[i,j],[k],...] which will make
-            simultaneous RB sequences where
-            Qi,Qj are a 2Q RB sequence and Qk is a 1Q sequence, etc.
-            E.g. [[0,3],[2],[1]] would create RB sequences that are
-            2Q for Q0/Q3, 1Q for Q1+Q2
-            The number of qubits is the sum of the entries.
-            For 'regular' RB the qubit_pattern is just [[0]],[[0,1]].
-        length_multiplier: if this is an array it scales each rb_sequence by
-            the multiplier
-        seed_offset: What to start the seeds at (e.g. if we
-            want to add more seeds later)
-        align_cliffs: If true adds a barrier across all qubits in rb_pattern
-            after each set of elements, not necessarily Cliffords
-            (note: aligns after each increment of elements including the
-            length multiplier so if the multiplier is [1,3] it will barrier
-            after 1 element for the first pattern and 3 for the second).
-        interleaved_gates: A list of gates of elements that
-            will be interleaved (for interleaved randomized benchmarking)
-            The length of the list would equal the length of the rb_pattern.
-        is_purity: True only for purity rb (default is False)
-        group_gates: On which group (or gate set) we perform RB
-            (default is the Clifford group)
-            '0' or None or 'Clifford': Clifford group
-            '1' or 'CNOT-Dihedral' or 'Non-Clifford': CNOT-Dihedral group
 
+            For example:
+
+            * ``length_vector = [1, 10, 20, 50, 75, 100, 125, 150, 175]``
+
+            * ``length_vector = None`` is the same as ``length_vector = [1, 10, 20]``
+
+        rb_pattern: A list of the lists of integers representing the
+            qubits indexes. For example, ``[[i,j],[k],...]`` will make
+            simultaneous RB sequences, where
+            there is a 2-qubit RB sequence on qbits Qi and Qj,
+            and a 1-qubit RB sequence on qubit Qk, etc.
+            Each qubit appers at most once.
+            The number of qubits on which RB is done is the sum of the lists
+            sizes.
+
+            For example:
+
+            * ``rb_pattern = [[0]]`` or ``rb_pattern = None`` -- \
+            create a 1-qubit RB sequence on qubit Q0.
+
+            * ``rb_pattern = [[0,1]]`` -- \
+            create a 2-qubit RB sequence on qubits Q0 and Q1.
+
+            * ``rb_pattern = [[2],[6,4]]`` -- \
+            create RB sequences that are 2-qubit RB for qubits Q6 and Q4, \
+            and 1-qubit RB for qubit Q2.
+
+        length_multiplier: An array that scales each RB sequence by
+            the multiplier.
+
+        seed_offset: What to start the seeds at, if we
+            want to add more seeds later.
+
+        align_cliffs: If ``True`` adds a barrier across all qubits in
+            the pattern after each set of group elements
+            (not necessarily Cliffords).
+
+            **Note:** the alignment considers the group multiplier.
+
+        interleaved_gates: A list of lists of gates that
+            will be interleaved. It is not ``None`` only for interleaved
+            randomized benchmarking.
+            The lengths of the lists should be equal to the length of the
+            lists in ``rb_pattern``.
+
+        is_purity: ``True`` only for purity randomized benchmarking
+            (default is ``False``).
+
+            **Note:** if ``is_purity = True`` then all patterns in
+            ``rb_pattern`` should have the same dimension
+            (e.g. only 1-qubit sequences, or only 2-qubit sequences),
+            and ``length_multiplier = None``.
+
+        group_gates: On which group (or set of gates) we perform RB
+            (the default is the Clifford group).
+
+            * ``group_gates='0'`` or ``group_gates=None`` or \
+            ``group_gates='Clifford'`` -- Clifford group.
+
+            * ``group_gates='1'`` or ``group_gates='CNOT-Dihedral'`` \
+            or ``group_gates='Non-Clifford'`` -- CNOT-Dihedral group.
 
     Returns:
-        A tuple of different fields depending on inputs. The different fields
-        are:
+        A tuple of different fields depending on the inputs.
+        The different fields are:
 
-         * ``circuits``: list of lists of circuits for the rb sequences
-            (separate list for each seed)
-         * ``xdata``: the sequences lengths (with multiplier if applicable)
-         * ``circuits_interleaved`` `(only if interleaved_gates is not None)`:
-           list of lists of circuits for the interleaved rb sequences
-           (separate list for each seed)
-         * ``circuits_purity`` `(only if is_purity=True)`:
-           list of lists of lists of circuits for purity rb
-           (separate list for each seed and each of the 3^n circuits)
-         * ``npurity`` `(only if is_purity=True)`:
-            the number of purity rb circuits (per seed)
-            which equals to 3^n, where n is the dimension
+         * ``circuits``: list of lists of circuits for the RB sequences \
+            (a separate list for each seed).
+
+         * ``xdata``: the sequences lengths (with multiplier if applicable).
+
+         * ``circuits_interleaved``: \
+           (only if ``interleaved_gates`` is not ``None``): \
+           list of lists of circuits for the interleaved RB sequences \
+           (a separate list for each seed).
+
+         * ``circuits_purity``: (only if ``is_purity=True``): \
+           list of lists of lists of circuits for purity RB \
+           (a separate list for each seed and each of the :math:`3^n` circuits).
+
+         * ``npurity``: (only if ``is_purity=True``): \
+            the number of purity RB circuits (per seed) \
+            which equals to :math:`3^n`, where n is the dimension.
+
+    Raises:
+
+        ValueError: if ``group_gates`` is unknown.
+        ValueError: if ``rb_pattern`` is not valid.
+        ValueError: if ``length_multiplier`` is not valid.
+
+
+    Examples:
+
+        1) Generate simultaneous standard RB sequences.
+
+        .. code-block::
+
+            length_vector = [1,10,20]
+            rb_pattern = [[0,3],[2],[1]]
+            length_multiplier = [1,3,3]
+            align_cliffs = True
+
+        Create RB sequences that are 2-qubit RB for qubits Q0 and Q3,
+        1-qubit RB for qubit Q1, and 1-qubit RB for qubit Q2.
+        Generate three times as many 1-qubit RB sequence elements,
+        than 2-qubit elements.
+        Place a barrier after 1 group element for the first pattern
+        and after 3 group elements for the second and third patterns.
+        The output ``xdata`` in this case is
+
+        .. code-block::
+
+            xdata=[[1,10,20],[3,30,60],[3,30,60]]
+
+        2) Generate simultaneous interleaved RB sequences.
+
+        .. code-block::
+
+            rb_pattern = [[0,3],[2],[1]]
+            interleaved_gates = [['cx 0 1'], ['x 0'], ['h 0']]
+
+        Interleave the 2-qubit gate ``cx`` on qubits Q0 and Q3,
+        a 1-qubit gate ``x`` on qubit Q2,
+        and a 1-qubit gate ``h`` on qubit Q1.
+
+        3) Generated purity RB sequences.
+
+        .. code-block::
+
+            rb_pattern = [[0,3],[1,2]]
+            npurity = True
+
+        Create purity 2-qubit RB circuits separately on qubits
+        Q0 and Q3 and on qubtis Q1 and Q2.
+        The output is ``npurity = 9`` in this case.
 
     """
     # Set modules (default is Clifford)
     if group_gates is None or group_gates in ('0',
                                               'Clifford',
                                               'clifford'):
-        Gutils = clutils()
-        Ggroup = Clifford
+        g_utils = clutils()
+        g_group = Clifford
         rb_circ_type = 'rb'
         group_gates_type = 0
     elif group_gates in ('1', 'Non-Clifford',
                          'NonClifford'
                          'CNOTDihedral',
                          'CNOT-Dihedral'):
-        Gutils = dutils()
-        Ggroup = CNOTDihedral
+        g_utils = dutils()
+        g_group = CNOTDihedral
         rb_circ_type = 'rb_cnotdihedral'
         group_gates_type = 1
     else:
@@ -220,7 +326,7 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
     # load group tables
     group_tables = [[] for _ in range(max_nrb)]
     for rb_num in range(max_nrb):
-        group_tables[rb_num] = Gutils.load_tables(rb_num+1)
+        group_tables[rb_num] = g_utils.load_tables(rb_num+1)
 
     # initialization: rb sequences
     circuits = [[] for e in range(nseeds)]
@@ -247,11 +353,11 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
         # rb_pattern
         Elmnts = []
         for rb_q_num in pattern_sizes:
-            Elmnts.append(Ggroup(rb_q_num))
+            Elmnts.append(g_group(rb_q_num))
         # Sequences for interleaved rb sequences
             Elmnts_interleaved = []
         for rb_q_num in pattern_sizes:
-            Elmnts_interleaved.append(Ggroup(rb_q_num))
+            Elmnts_interleaved.append(g_group(rb_q_num))
 
         # go through and add elements to RB sequences
         length_index = 0
@@ -259,12 +365,12 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
             for (rb_pattern_index, rb_q_num) in enumerate(pattern_sizes):
 
                 for _ in range(length_multiplier[rb_pattern_index]):
-                    new_elmnt_gatelist = Gutils.random_gates(
+                    new_elmnt_gatelist = g_utils.random_gates(
                         rb_q_num)
-                    Elmnts[rb_pattern_index] = Gutils.compose_gates(
+                    Elmnts[rb_pattern_index] = g_utils.compose_gates(
                         Elmnts[rb_pattern_index], new_elmnt_gatelist)
                     general_circ += replace_q_indices(
-                        get_quantum_circuit(Gutils.gatelist(),
+                        get_quantum_circuit(g_utils.gatelist(),
                                             rb_q_num),
                         rb_pattern[rb_pattern_index], qr)
 
@@ -275,22 +381,22 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
                     # interleaved rb sequences
                     if interleaved_gates is not None:
                         Elmnts_interleaved[rb_pattern_index] = \
-                            Gutils.compose_gates(
+                            g_utils.compose_gates(
                                 Elmnts_interleaved[rb_pattern_index],
                                 new_elmnt_gatelist)
                         interleaved_circ += replace_q_indices(
-                            get_quantum_circuit(Gutils.gatelist(),
+                            get_quantum_circuit(g_utils.gatelist(),
                                                 rb_q_num),
                             rb_pattern[rb_pattern_index], qr)
                         Elmnts_interleaved[rb_pattern_index] = \
-                            Gutils.compose_gates(
+                            g_utils.compose_gates(
                                 Elmnts_interleaved[rb_pattern_index],
                                 interleaved_gates[rb_pattern_index])
                         # add a barrier - interleaved rb
                         interleaved_circ.barrier(
                             *[qr[x] for x in rb_pattern[rb_pattern_index]])
                         interleaved_circ += replace_q_indices(
-                            get_quantum_circuit(Gutils.gatelist(),
+                            get_quantum_circuit(g_utils.gatelist(),
                                                 rb_q_num),
                             rb_pattern[rb_pattern_index], qr)
                         # add a barrier - interleaved rb
@@ -317,9 +423,9 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
                 circ_interleaved += interleaved_circ
 
                 for (rb_pattern_index, rb_q_num) in enumerate(pattern_sizes):
-                    inv_key = Gutils.find_key(Elmnts[rb_pattern_index],
-                                              rb_q_num)
-                    inv_circuit = Gutils.find_inverse_gates(
+                    inv_key = g_utils.find_key(Elmnts[rb_pattern_index],
+                                               rb_q_num)
+                    inv_circuit = g_utils.find_inverse_gates(
                         rb_q_num,
                         group_tables[rb_q_num-1][inv_key])
                     circ += replace_q_indices(
@@ -328,10 +434,10 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
                     # calculate the inverse and produce the circuit
                     # for interleaved rb
                     if interleaved_gates is not None:
-                        inv_key = Gutils.find_key(Elmnts_interleaved
-                                                  [rb_pattern_index],
-                                                  rb_q_num)
-                        inv_circuit = Gutils.find_inverse_gates(
+                        inv_key = g_utils.find_key(Elmnts_interleaved
+                                                   [rb_pattern_index],
+                                                   rb_q_num)
+                        inv_circuit = g_utils.find_inverse_gates(
                             rb_q_num,
                             group_tables[rb_q_num - 1][inv_key])
                         circ_interleaved += replace_q_indices(
@@ -427,7 +533,7 @@ def randomized_benchmarking_seq(nseeds=1, length_vector=None,
                         rb_circ_type + '_X_length_%d_seed_%d' % \
                         (length_index, seed + seed_offset)
                     cnotdihedral_interleaved_circ.name = \
-                        rb_circ_type + 'interleaved_X_length_%d_seed_%d' % \
+                        rb_circ_type + '_interleaved_X_length_%d_seed_%d' % \
                         (length_index, seed + seed_offset)
 
                 circuits[seed].append(circ)
@@ -464,11 +570,12 @@ def replace_q_indices(circuit, q_nums, qr):
     qubit label in the first index of q_nums, 1 with the second index...
 
     Args:
-        circuit: circuit to operate on
-        q_nums: list of qubit indices
+        circuit (QuantumCircuit): circuit to operate on
+        q_nums (list): list of qubit indices
+        qr (QuantumRegister): A quantum register to use for the output circuit
 
     Returns:
-        updated circuit
+        QuantumCircuit: updated circuit
     """
 
     new_circuit = qiskit.QuantumCircuit(qr)
@@ -486,11 +593,11 @@ def get_quantum_circuit(gatelist, num_qubits):
     Returns the circuit in the form of a QuantumCircuit object.
 
     Args:
-        num_qubits: the number of qubits (dimension).
-        gatelist: a list of gates.
+        num_qubits (int): the number of qubits (dimension).
+        gatelist (list): a list of gates.
 
     Returns:
-        A QuantumCircuit object.
+        QuantumCircuit: A QuantumCircuit object.
     """
     qr = qiskit.QuantumRegister(num_qubits)
     qc = qiskit.QuantumCircuit(qr)
@@ -513,7 +620,7 @@ def get_quantum_circuit(gatelist, num_qubits):
             qubits = [qr[int(x)] for x in split[1:]]
 
         for sub_op in op_names:
-            operation = eval('qiskit.QuantumCircuit.' + sub_op)
+            operation = getattr(qiskit.QuantumCircuit, sub_op)
             if sub_op == 'u1':
                 operation(qc, theta, *qubits)
             else:
